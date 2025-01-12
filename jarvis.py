@@ -251,7 +251,7 @@ def camera_tracking():
     main()
 
 def voice_control():
-    global running, popup_manager
+    global running
     
     # Initialize COM
     pythoncom.CoInitialize()
@@ -290,10 +290,6 @@ def voice_control():
                 text = recognizer.recognize_google(audio).lower()
                 print(f"Recognized: {text}")
                 
-                # Show what was heard in chat window using signal
-                if popup_manager:
-                    popup_manager.show_chat_message(text, is_user=True)
-                
                 # Add reboot/restart command
                 if any(word in text for word in WAKE_WORDS) and any(word in text for word in ["reboot", "restart"]):
                     print("Rebooting Jarvis...")
@@ -301,7 +297,7 @@ def voice_control():
                     os.execv(sys.executable, ['python'] + [script_path])
                 
                 # Add quit command - force terminate process
-                if any(word in text for word in WAKE_WORDS) and any(word in text for word in ["quit", "exit", "stop", "close"]):
+                if any(word in text for word in WAKE_WORDS) and any(word in text for word in ["quit", "exit", "stop", "shutdown", "shut down", "close"]):
                     print("Shutting down Jarvis...")
                     import subprocess
                     subprocess.run(['taskkill', '/F', '/PID', str(os.getpid())], capture_output=True)
@@ -336,6 +332,13 @@ def voice_control():
                             print("No valid volume level found")
                     except Exception as e:
                         print(f"Error setting volume: {e}")
+                
+
+                if "what" in text and "time" in text and "is" in text:
+                    current_time = time.strftime("%I:%M %p")
+                    message = f"It is {current_time}"
+                    # popup_manager.notification_queue.put(message)
+                    custom_notification(message)
 
         except sr.UnknownValueError:
             print("Could not understand audio")
@@ -357,163 +360,13 @@ class NotificationThread(QThread):
         self.show_notification.emit(self.message)
         self.msleep(100)
 
-class ChatWindow(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
-        self.setAttribute(Qt.WA_TranslucentBackground)
-        
-        # Create central widget and layout
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        self.layout = QVBoxLayout(central_widget)
-        self.layout.setContentsMargins(0, 0, 0, 0)  # Remove outer margins
-        self.layout.setSpacing(0)
-        
-        # Create chat box
-        self.chat_widget = QWidget()
-        self.chat_layout = QVBoxLayout(self.chat_widget)
-        self.chat_layout.setContentsMargins(10, 10, 10, 10)
-        self.chat_layout.setSpacing(5)
-        self.chat_layout.setAlignment(Qt.AlignTop)
-        
-        # Style the chat box
-        self.chat_widget.setStyleSheet("""
-            QWidget {
-                background-color: rgba(30, 30, 30, 0.9);
-                border-radius: 15px;
-            }
-            QLabel {
-                color: white;
-                font-size: 11pt;
-                padding: 5px;
-            }
-        """)
-        
-        # Add stretch to keep chat box at minimum size
-        self.layout.addWidget(self.chat_widget, 0, Qt.AlignTop)
-        
-        # Store initial/minimum sizes
-        self.default_width = 400
-        self.default_height = 100
-        
-        # Set initial size
-        self.setFixedWidth(self.default_width)
-        self.setMinimumHeight(self.default_height)
-        self.move(20, 20)
-        
-        # Setup fade timer
-        self.fade_timer = QTimer(self)
-        self.fade_timer.timeout.connect(self.fade_out)
-        
-        # Initialize animations
-        self.fade_anim = None
-        self.slide_anim = None
-        
-        # Hide initially
-        self.hide()
-    
-    def add_message(self, text, is_user=True):
-        try:
-            # Reset any existing animations
-            if self.fade_anim is not None:
-                self.fade_anim.stop()
-                self.fade_anim = None
-            
-            if self.fade_timer is not None:
-                self.fade_timer.stop()
-            
-            # Create message label
-            label = QLabel(text)
-            label.setWordWrap(True)
-            label.setStyleSheet(f"""
-                background-color: {'#00BFFF' if is_user else '#444444'};
-                border-radius: 10px;
-                padding: 8px;
-                color: white;
-                margin: 2px;
-            """)
-            
-            # Add to layout
-            self.chat_layout.addWidget(label)
-            
-            # Calculate exact height needed
-            total_height = 0
-            for i in range(self.chat_layout.count()):
-                widget = self.chat_layout.itemAt(i).widget()
-                if widget:
-                    widget.adjustSize()
-                    total_height += widget.height() + self.chat_layout.spacing()
-            
-            # Add only the margins we need
-            total_height += self.chat_layout.contentsMargins().top() + self.chat_layout.contentsMargins().bottom()
-            
-            # Set sizes exactly
-            new_height = max(self.default_height, total_height)
-            self.setFixedHeight(new_height)
-            self.chat_widget.setFixedHeight(new_height)
-            
-            # Show and start fade timer
-            self.setWindowOpacity(1.0)
-            if not self.isVisible():
-                self.show()
-                # Slide in animation
-                self.slide_anim = QPropertyAnimation(self, b"pos")
-                self.slide_anim.setDuration(300)
-                self.slide_anim.setStartValue(QPoint(-self.width(), 20))
-                self.slide_anim.setEndValue(QPoint(20, 20))
-                self.slide_anim.start()
-            
-            # Reset fade timer (30 seconds)
-            self.fade_timer.start(30000)
-            
-        except Exception as e:
-            print(f"Error adding message: {e}")
-    
-    def fade_out(self):
-        try:
-            if self.fade_anim is None:
-                self.fade_anim = QPropertyAnimation(self, b"windowOpacity")
-                self.fade_anim.setDuration(1000)
-                self.fade_anim.setStartValue(1.0)
-                self.fade_anim.setEndValue(0.0)
-                self.fade_anim.finished.connect(self.on_fade_finished)
-                self.fade_anim.start()
-        except Exception as e:
-            print(f"Error in fade_out: {e}")
-    
-    def on_fade_finished(self):
-        try:
-            # Clear messages
-            for i in reversed(range(self.chat_layout.count())): 
-                widget = self.chat_layout.itemAt(i).widget()
-                if widget is not None:
-                    widget.setParent(None)
-            
-            # Reset sizes exactly
-            self.setFixedSize(self.default_width, self.default_height)
-            self.chat_widget.setFixedSize(self.default_width, self.default_height)
-            
-            # Reset animation and hide
-            self.fade_anim = None
-            self.hide()
-            
-        except Exception as e:
-            print(f"Error in on_fade_finished: {e}")
-
 class PopupManager(QObject):
-    show_chat_signal = pyqtSignal(str, bool)  # Signal for chat messages
-
     def __init__(self):
         super().__init__()
         self.app = QApplication.instance() or QApplication(sys.argv)
         self.active_popups = []
         self.notification_queue = Queue()
         self.current_popup = None
-        
-        # Create chat window in the main thread
-        self.chat_window = ChatWindow()
-        self.show_chat_signal.connect(self.chat_window.add_message)
         
         # Create timer to process queue
         self.timer = QTimer()
@@ -540,12 +393,8 @@ class PopupManager(QObject):
     def queue_notification(self, message):
         self.notification_queue.put(message)
 
-    def show_chat_message(self, text, is_user=True):
-        # Emit signal instead of direct call
-        self.show_chat_signal.emit(text, is_user)
-
 class PopupWindow(QMainWindow):
-    closed = pyqtSignal()  # Signal for when window is closed
+    closed = pyqtSignal()
 
     def __init__(self, message):
         super().__init__()
@@ -558,11 +407,14 @@ class PopupWindow(QMainWindow):
         layout = QVBoxLayout(central_widget)
         layout.setContentsMargins(10, 10, 10, 10)
         
-        # Create labels
+        # Create labels with word wrap enabled
         jarvis_label = QLabel("JARVIS")
         jarvis_label.setStyleSheet("color: #00BFFF; font-weight: bold; font-size: 10pt")
+        
         message_label = QLabel(message)
         message_label.setStyleSheet("color: white; font-size: 11pt")
+        message_label.setWordWrap(True)  # Enable word wrap
+        message_label.adjustSize()  # Adjust size to content
         
         # Add labels to layout
         layout.addWidget(jarvis_label, alignment=Qt.AlignCenter)
@@ -571,16 +423,23 @@ class PopupWindow(QMainWindow):
         # Set window style
         central_widget.setStyleSheet("background-color: rgba(30, 30, 30, 0.9); border-radius: 5px")
         
+        # Calculate required width and height
+        message_width = message_label.fontMetrics().boundingRect(message).width()
+        width = min(max(250, message_width + 40), 400)  # Min 250px, Max 400px
+        
         # Set size and position
-        self.setFixedSize(250, 80)
+        self.setFixedWidth(width)
+        self.adjustSize()  # Adjust height automatically
+        height = self.height()
+        
         screen = QApplication.primaryScreen().geometry()
-        self.move(-250, 20)
+        self.move(-width, 20)
         
         # Slide in animation
         self.anim = QPropertyAnimation(self, b"geometry")
         self.anim.setDuration(300)
-        self.anim.setStartValue(QRect(-250, 20, 250, 80))
-        self.anim.setEndValue(QRect(20, 20, 250, 80))
+        self.anim.setStartValue(QRect(-width, 20, width, height))
+        self.anim.setEndValue(QRect(20, 20, width, height))
         self.anim.start()
         
         # Setup fade out timer
@@ -602,6 +461,15 @@ class PopupWindow(QMainWindow):
 def update_volume_with_notification(volume_level):
     try:
         message = f"Volume set to {volume_level}%"
+        global popup_manager
+        if popup_manager is not None:
+            popup_manager.queue_notification(message)
+    except Exception as e:
+        print(f"Error showing volume notification: {e}")
+
+def custom_notification(message):
+    try:
+        # message = f"Volume set to {volume_level}%"
         global popup_manager
         if popup_manager is not None:
             popup_manager.queue_notification(message)
